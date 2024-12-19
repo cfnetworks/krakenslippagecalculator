@@ -54,6 +54,9 @@ Symbol: XXBTZUSD
 Order Size: 1
 Slippage: 0.03%
 ```
+## Demo
+
+[Live Demo](https://cfnetworks.github.io/krakenslippagecalculator/)
 
 ## Contributing
 Contributions are welcome! Please follow these steps:
