@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kraken Slippage Calculator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f9f9f9;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 600px;
+            margin: auto;
+            padding: 20px;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        label {
+            display: block;
+            margin: 10px 0 5px;
+            font-weight: bold;
+        }
+        input, select, button {
+            width: 95%;
+            padding-top: 10px;
+            padding-bottom: 10px;
+            padding-left: 10px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        button {
+            background-color: #007BFF;
+            color: #fff;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .output {
+            margin-top: 20px;
+            padding: 10px;
+            background: #f1f1f1;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            display: none;
+        }
+        footer {
+            text-align: center;
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f9f9f9;
+        }
+        footer a {
+            color: #007BFF;
+            text-decoration: none;
+        }
+        footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Kraken Slippage Calculator</h1>
+    <form id="slippageForm">
+        <label for="symbol">Trading Pair:</label>
+        <input type="text" id="symbol" placeholder="Enter trading pair (e.g., BTCUSDT)" value="BTCUSDT" required>
+        
+        <label for="orderSize">Order Size:</label>
+        <input type="number" id="orderSize" placeholder="Enter order size in base currency" value="1" required>
+        
+        <label for="side">Side:</label>
+        <select id="side">
+            <option value="buy">Buy</option>
+            <option value="sell">Sell</option>
+        </select>
+        
+        <button type="button" id="calculateBtn">Calculate Slippage</button>
+    </form>
+    <div class="output" id="output"></div>
+</div>
+<script>
+// Kraken API endpoint for order book
+const KRAKEN_API_URL = 'https://api.kraken.com/0/public/Depth';
+
+/**
+ * Fetches order book data for a given trading pair from Kraken.
+ * @param {string} symbol - Trading pair, e.g., 'XXBTZUSD'.
+ * @param {number} limit - Number of levels in the order book to fetch (default: 1000).
+ * @returns {Promise<object>} - The order book data.
+ */
+async function fetchOrderBook(symbol, limit = 1000) {
+    const url = `${KRAKEN_API_URL}?pair=${symbol}&count=${limit}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`Error fetching order book: ${response.statusText}`);
+    }
+    const data = await response.json();
+    if (data.error && data.error.length > 0) {
+        throw new Error(`Kraken API error: ${data.error.join(', ')}`);
+    }
+    return data.result[Object.keys(data.result)[0]];
+}
+
+/**
+ * Calculates slippage for a given order size.
+ * @param {Array} orderBookSide - Either bids or asks from the order book.
+ * @param {number} orderSize - The order size to calculate slippage for.
+ * @param {string} side - 'buy' or 'sell'.
+ * @returns {object} - Slippage percentage and the effective price.
+ */
+function calculateSlippage(orderBookSide, orderSize, side) {
+    let accumulatedVolume = 0;
+    let weightedPriceSum = 0;
+	
+	console.log(orderBookSide);
+
+    for (const [price, quantity] of orderBookSide) {
+        const currentVolume = parseFloat(quantity);
+        const currentPrice = parseFloat(price);
+
+        if (accumulatedVolume + currentVolume >= orderSize) {
+            const remainingVolume = orderSize - accumulatedVolume;
+            weightedPriceSum += remainingVolume * currentPrice;
+            accumulatedVolume += remainingVolume;
+            break;
+        } else {
+            weightedPriceSum += currentVolume * currentPrice;
+            accumulatedVolume += currentVolume;
+        }
+    }
+
+    if (accumulatedVolume < orderSize) {
+        return {
+            error: `Order size ${orderSize} exceeds available liquidity on the ${side} side.`,
+        };
+    }
+
+    const effectivePrice = weightedPriceSum / orderSize;
+    const marketPrice = parseFloat(orderBookSide[0][0]);
+    const slippage = ((effectivePrice - marketPrice) / marketPrice) * 100;
+    return { slippage, effectivePrice };
+}
+
+/**
+ * Main function to compute slippage for a given trading pair and order size on Kraken.
+ * @param {string} symbol - Trading pair, e.g., 'XXBTZUSD'.
+ * @param {number} orderSize - Order size in base currency.
+ * @param {string} side - 'buy' or 'sell'.
+ */
+async function main(symbol, orderSize, side) {
+    const outputDiv = document.getElementById('output');
+    outputDiv.innerHTML = 'Calculating...';
+
+    try {
+        // Fetch order book data
+        const orderBook = await fetchOrderBook(symbol);
+        const orderBookSide = side === 'buy' ? orderBook.asks : orderBook.bids;
+        const currentDateTime = new Date();
+
+        // Update slippage data
+        const result = calculateSlippage(orderBookSide, orderSize, side);
+        if (result.error) {
+            outputDiv.innerHTML = `<p style="color: red;">${result.error}</p>`;
+        } else {
+            outputDiv.innerHTML = `
+                <p>Timestamp: <strong>${currentDateTime.toISOString()}</strong></p>
+                <p>Symbol: <strong>${symbol}</strong></p>
+                <p>Order Size: <strong>${orderSize}</strong></p>
+                <p>Slippage: <strong>${Math.abs(result.slippage).toFixed(8)}%</strong></p>
+            `;
+        }
+    } catch (error) {
+        outputDiv.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+    }
+}
+
+// Add event listener for the calculate button
+document.getElementById('calculateBtn').addEventListener('click', () => {
+    const symbol = document.getElementById('symbol').value.trim();
+    const orderSize = parseFloat(document.getElementById('orderSize').value);
+    const side = document.getElementById('side').value;
+    document.getElementById('output').style.display = 'block';
+
+    if (!symbol || isNaN(orderSize) || orderSize <= 0) {
+        alert('Please provide valid inputs.');
+        return;
+    }
+    main(symbol.toUpperCase(), orderSize, side);
+});
+</script>
+<footer>
+    <p>View the source code on <a href="https://github.com/cfnetworks/krakenslippagecalculator" target="_blank">GitHub</a>.</p>
+</footer>
+</body>
+</html>
